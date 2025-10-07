@@ -188,7 +188,7 @@ CSRF_COOKIE_SECURE = False
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
 
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=Csv())
+CORS_ALLOWED_ORIGINS = ["http://192.168.11.60:3000"]
 SESSION_COOKIE_DOMAIN = "192.168.11.60"
 CSRF_TRUSTED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=Csv())
 CORS_EXPOSE_HEADERS = ["Content-Type", "X-CSRFToken"]
@@ -303,3 +303,7 @@ from django.conf import settings
 
 WATERMARK_IMAGE_PATH = os.path.join(settings.MEDIA_ROOT, 'logo', 'watermark1.jpg')
 DEMP_IMAGE = os.path.join(settings.MEDIA_ROOT, 'logo', 'header.JPG')
+
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = ["http://192.168.11.60:3000"]
+CORS_ALLOW_ALL_ORIGINS = False

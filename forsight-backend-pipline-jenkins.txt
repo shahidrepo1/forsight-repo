@@ -1,0 +1,156 @@
+pipeline {
+  agent any
+
+  environment {
+    // 🐳 Docker Image Info
+    DOCKER_REGISTRY = "192.168.11.60"        // Harbor IP
+    DOCKER_PROJECT  = "forsight-harbor"      // Harbor project name
+    DOCKER_REPO     = "backend"
+    IMAGE_TAG       = "build-${BUILD_NUMBER}" // Versioned build tag
+    IMAGE_FULL      = "${DOCKER_REGISTRY}/${DOCKER_PROJECT}/${DOCKER_REPO}:${IMAGE_TAG}"
+    IMAGE_LATEST    = "${DOCKER_REGISTRY}/${DOCKER_PROJECT}/${DOCKER_REPO}:latest"
+
+    // 📁 Environment file path
+    ENV_FILE = "Forsight-backend-staging-main/.env"
+  }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+  }
+
+  stages {
+
+    // 🧹 Stage 1: Checkout Code
+    stage('Checkout Code') {
+      steps {
+        script {
+          echo "🧹 Cleaning workspace..."
+          deleteDir()
+
+          echo "⬇️ Cloning latest Forsight backend code..."
+          git branch: 'main',
+              url: 'https://github.com/shahidrepo1/forsight-repo.git',
+              credentialsId: 'github-creds'
+
+          echo "✅ Repository cloned successfully."
+        }
+      }
+    }
+
+    // 🏗️ Stage 2: Build & Push Docker Image
+    stage('Build & Push Docker Image') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'harbor-creds',
+                                          usernameVariable: 'HARBOR_USER',
+                                          passwordVariable: 'HARBOR_PWD')]) {
+          sh '''
+            echo "🧱 Building Forsight Backend image version: ${IMAGE_TAG} ..."
+            docker build -t ${IMAGE_FULL} -f Forsight-backend-staging-main/Dockerfile Forsight-backend-staging-main
+
+            echo "🔐 Logging in to Harbor..."
+            echo $HARBOR_PWD | docker login http://$DOCKER_REGISTRY -u $HARBOR_USER --password-stdin
+
+            echo "📤 Pushing versioned image to Harbor..."
+            docker push ${IMAGE_FULL}
+
+            echo "🔄 Tagging image as 'latest'..."
+            docker tag ${IMAGE_FULL} ${IMAGE_LATEST}
+            docker push ${IMAGE_LATEST}
+
+            echo "✅ Image pushed successfully!"
+            echo "✅ Image version: ${IMAGE_TAG}"
+          '''
+        }
+      }
+    }
+
+    // ⚙️ Stage 3: Run Django Migrations
+    stage('Run Django Migrations') {
+      steps {
+        sh '''
+          echo "⚙️ Running Django migrations..."
+          docker run --rm \
+            --network appnet \
+            --env-file ${ENV_FILE} \
+            -w /app \
+            ${IMAGE_LATEST} \
+            sh -c "python manage.py migrate --noinput"
+
+          echo "✅ Migrations completed successfully."
+        '''
+      }
+    }
+
+    // 🚀 Stage 4: Deploy Backend + Celery + Celery Beat
+    stage('Deploy Containers') {
+      steps {
+        sh '''
+          echo "🚀 Deploying Forsight Backend, Celery & Beat..."
+
+          docker stop forsight-backend forsight-celery forsight-celery-beat || true
+          docker rm forsight-backend forsight-celery forsight-celery-beat || true
+
+          echo "📥 Pulling latest image..."
+          docker pull ${IMAGE_LATEST}
+
+          echo "▶️ Starting Backend container..."
+          docker run -d --restart always --name forsight-backend \
+            --network appnet \
+            -p 8000:8000 \
+            --env-file ${ENV_FILE} \
+            ${IMAGE_LATEST}
+
+          echo "▶️ Starting Celery Worker..."
+          docker run -d --restart always --name forsight-celery \
+            --network appnet \
+            --env-file ${ENV_FILE} \
+            ${IMAGE_LATEST} \
+            celery -A forsight worker -l info
+
+          echo "▶️ Starting Celery Beat..."
+          docker run -d --restart always --name forsight-celery-beat \
+            --network appnet \
+            --env-file ${ENV_FILE} \
+            ${IMAGE_LATEST} \
+            celery -A forsight beat -l info
+
+          echo "✅ All backend services deployed successfully!"
+        '''
+      }
+    }
+
+    // 🩺 Stage 5: Health Check
+    stage('Health Check') {
+      steps {
+        sh '''
+          echo "🔍 Checking Forsight Backend health..."
+
+          sleep 5  # Give container time to start
+
+          if docker ps | grep -q forsight-backend; then
+            echo "✅ Backend container is running successfully!"
+          else
+            echo "⚠️ Backend container is not running! Please check logs using: docker logs forsight-backend"
+            exit 1
+          fi
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "🔒 Logging out from Harbor..."
+      sh 'docker logout http://192.168.11.60 || true'
+      echo "🏁 Backend pipeline finished."
+    }
+    success {
+      echo "🎉 Forsight Backend deployment successful!"
+    }
+    failure {
+      echo "❌ Forsight Backend deployment failed! Please check logs."
+    }
+  }
+}

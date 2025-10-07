@@ -1,0 +1,123 @@
+pipeline {
+  agent any
+
+  environment {
+    // 🔧 Environment Variables
+    DOCKER_REGISTRY = "192.168.11.60"        // Harbor IP
+    DOCKER_PROJECT  = "forsight-harbor"      // Harbor project name
+    DOCKER_REPO     = "frontend"             // Image repo name
+    IMAGE_TAG       = "build-${BUILD_NUMBER}" // Versioned tag
+    IMAGE_FULL      = "${DOCKER_REGISTRY}/${DOCKER_PROJECT}/${DOCKER_REPO}:${IMAGE_TAG}"
+    IMAGE_LATEST    = "${DOCKER_REGISTRY}/${DOCKER_PROJECT}/${DOCKER_REPO}:latest"
+  }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+  }
+
+  stages {
+
+    // 🧹 Stage 1: Checkout Code
+    stage('Checkout Code') {
+      steps {
+        script {
+          echo "🧹 Cleaning workspace..."
+          deleteDir()
+
+          echo "⬇️ Cloning latest Forsight frontend code..."
+          git branch: 'main',
+              url: 'https://github.com/shahidrepo1/forsight-repo.git',
+              credentialsId: 'github-creds'
+
+          echo "✅ Repository cloned successfully."
+        }
+      }
+    }
+
+    // 🏗️ Stage 2: Build & Push Docker Image
+    stage('Build & Push Docker Image') {
+      steps {
+        dir('forsight-frontend-user-staging-main') {
+          withCredentials([usernamePassword(credentialsId: 'harbor-creds',
+                                            usernameVariable: 'HARBOR_USER',
+                                            passwordVariable: 'HARBOR_PWD')]) {
+            sh '''
+              echo "🧱 Building Forsight Frontend image version: ${IMAGE_TAG} ..."
+              docker build -t ${IMAGE_FULL} -f Dockerfile .
+
+              echo "🔐 Logging in to Harbor..."
+              echo $HARBOR_PWD | docker login http://$DOCKER_REGISTRY -u $HARBOR_USER --password-stdin
+
+              echo "📤 Pushing versioned image to Harbor..."
+              docker push ${IMAGE_FULL}
+
+              echo "🔄 Tagging image as 'latest'..."
+              docker tag ${IMAGE_FULL} ${IMAGE_LATEST}
+              docker push ${IMAGE_LATEST}
+
+              echo "✅ Image pushed successfully!"
+              echo "✅ Image version: ${IMAGE_TAG}"
+            '''
+          }
+        }
+      }
+    }
+
+    // 🚀 Stage 3: Deploy Container
+    stage('Deploy Container') {
+      steps {
+        sh '''
+          echo "🚀 Deploying Forsight Frontend..."
+
+          # Stop and remove old container if exists
+          docker stop forsight-frontend || true
+          docker rm forsight-frontend || true
+
+          echo "📥 Pulling latest image..."
+          docker pull ${IMAGE_LATEST}
+
+          echo "▶️ Starting new Frontend container..."
+          docker run -d --restart always --name forsight-frontend \
+            --network appnet \
+            -p 3000:3173 \
+            ${IMAGE_LATEST}
+
+          echo "✅ Forsight Frontend deployed successfully!"
+        '''
+      }
+    }
+
+    // 🩺 Stage 4: Health Check
+    stage('Health Check') {
+      steps {
+        sh '''
+          echo "🔍 Performing health check on Forsight Frontend..."
+          
+          sleep 5  # Allow container to initialize
+          if docker ps | grep -q forsight-frontend; then
+            echo "✅ Container is running successfully."
+          else
+            echo "⚠️ Container not running! Check logs using: docker logs forsight-frontend"
+            exit 1
+          fi
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      echo "🔒 Logging out from Harbor..."
+      sh 'docker logout http://192.168.11.60 || true'
+      echo "🏁 Frontend pipeline finished."
+    }
+    success {
+      echo "🎉 Deployment successful!"
+    }
+    failure {
+      echo "❌ Deployment failed! Check Jenkins logs or container logs for details."
+    }
+  }
+}

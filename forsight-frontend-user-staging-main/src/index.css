@@ -1,0 +1,45 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.urdu-text {
+  /* font-family: "Noto Nastaliq Urdu", cursive; */
+  font-family: "Noto Nastaliq Urdu", serif;
+  /* direction: rtl; */
+}
+/* Hide scrollbar for Chrome, Safari, and Opera */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge, and Firefox */
+.hide-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+
+.dark {
+  background-color: "#1e293b";
+  color: "#e2e8f0";
+}
+
+/* .bg-gradient-dark
+{
+  @apply bg-gradient-to-t from-[#1c4797] to-[#2865d7]
+} */
+
+input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0px 1000px white inset !important;
+  -webkit-text-fill-color: black !important;
+  caret-color: black;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Dark Mode */
+.dark input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0px 1000px #1f2937 inset !important; /* Tailwind bg-gray-800 */
+  -webkit-text-fill-color: white !important;
+  caret-color: white;
+}
